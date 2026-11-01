@@ -101,7 +101,7 @@
     }
   },
   "additionalProperties": false,
-  "$id": "https://raw.githubusercontent.com/nyaomaru/changelog-bot/main/public/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/necoz-oss/changelog-bot/main/public/config.schema.json",
   "title": "changelog-bot config",
   "description": "Configuration file for @nyaomaru/changelog-bot."
 }

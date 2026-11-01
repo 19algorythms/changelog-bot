@@ -123,8 +123,11 @@ jobs:
           echo "::error::@nyaomaru/changelog-bot@${version} is not available after 5 minutes"
           exit 1
 
+      # WHY: Actions does not redirect the previous owner. Callers of this
+      # reusable workflow should pin @main after this file is merged. Existing
+      # release tags still reference nyaomaru/changelog-bot and stay unchanged.
       - name: Run changelog bot action
-        uses: nyaomaru/changelog-bot@v0
+        uses: necoz-oss/changelog-bot@v0
         with:
           changelog-path: ${{ inputs.changelog_path }}
           config-path: ${{ inputs.config_path }}

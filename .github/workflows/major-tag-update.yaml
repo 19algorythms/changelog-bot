@@ -3,8 +3,15 @@ on:
   release:
     types: [published]
 
+# WHY: Repository default GITHUB_TOKEN permission is read. This job force-moves
+# the v0 tag, which needs contents write and nothing else.
+permissions:
+  contents: write
+
 jobs:
   move-v0:
+    # v1 releases leave the v0 tag where it is. The script repeats this check.
+    if: startsWith(github.event.release.tag_name, 'v0.')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,10 +24,34 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Move v0 tag to this release's commit
+      - name: Resolve the published release tag
+        id: release
         env:
-          SHA: ${{ github.event.release.target_commitish }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          git checkout "$SHA"
-          git tag -fa v0 -m "Move v0 to ${{ github.event.release.tag_name }}"
-          git push origin v0 --force
+          set -euo pipefail
+          # WHY: target_commitish can be a branch name. Fetch and peel the
+          # published tag so annotated and lightweight tags both yield the
+          # tagged commit, even when that branch has moved.
+          target="$(node scripts/resolve-v0-tag-target.mjs "$RELEASE_TAG")"
+          if [[ "$target" == skip ]]; then
+            echo "move=false" >> "$GITHUB_OUTPUT"
+            echo "Release ${RELEASE_TAG} does not move the v0 tag."
+            exit 0
+          fi
+          if [[ ! "$target" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Resolved release commit is not a SHA: ${target}"
+            exit 1
+          fi
+          echo "move=true" >> "$GITHUB_OUTPUT"
+          echo "commit=${target}" >> "$GITHUB_OUTPUT"
+
+      - name: Move v0 tag to the published release commit
+        if: steps.release.outputs.move == 'true'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          set -euo pipefail
+          git tag -fa v0 "$RELEASE_COMMIT" -m "Move v0 to ${RELEASE_TAG}"
+          git push origin refs/tags/v0 --force

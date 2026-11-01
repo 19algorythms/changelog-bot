@@ -3,7 +3,7 @@ import { CliConfigFileSchema } from '@/schema/config-file.js';
 
 /** Stable id of the published schema (also used for `$schema` hints). */
 export const CLI_CONFIG_JSON_SCHEMA_ID =
-  'https://raw.githubusercontent.com/nyaomaru/changelog-bot/main/public/config.schema.json';
+  'https://raw.githubusercontent.com/necoz-oss/changelog-bot/main/public/config.schema.json';
 
 /**
  * Build the JSON Schema for `changelog-bot.config.json`.
