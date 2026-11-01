@@ -1,14 +1,16 @@
 <h1 align="center">
-  <img src="https://raw.githubusercontent.com/nyaomaru/changelog-bot/main/public/ChangelogBot_logo02.png" alt="changelog-bot type logo" width="360" />
+  <img src="https://raw.githubusercontent.com/necoz-oss/changelog-bot/main/public/ChangelogBot_logo02.png" alt="changelog-bot type logo" width="360" />
 </h1>
 
 <p align="center">
-    <img src="https://raw.githubusercontent.com/nyaomaru/changelog-bot/main/public/ChangelogBot_image.png" width="600px" align="center" alt="changelog-bot logo" />
+    <img src="https://raw.githubusercontent.com/necoz-oss/changelog-bot/main/public/ChangelogBot_image.png" width="600px" align="center" alt="changelog-bot logo" />
 </p>
 
 Releases should feel exciting, not tedious.
 
 `@nyaomaru/changelog-bot` 🤖 turns your Git history and release notes into a polished changelog entry (and optional PR) in a single run. Drop it into CI, run it locally, or hand it to your release captain—either way, you ship with a crisp changelog and zero copy-paste fatigue.
+
+The GitHub repository is [necoz-oss/changelog-bot](https://github.com/necoz-oss/changelog-bot). The npm package name is still `@nyaomaru/changelog-bot`. In workflows, use `necoz-oss/changelog-bot`. GitHub Actions does not follow repository redirects for actions or reusable workflows, so keep `uses:` on the new owner. Web and git URLs for `nyaomaru/changelog-bot` still redirect.
 
 ## Why changelog-bot?
 
@@ -266,20 +268,20 @@ Config files use camelCase keys matching the CLI options:
 `whyConfidence`, and `whyLabel`. Unknown keys are rejected so typos fail fast.
 
 #### Editor autocompletion with JSON Schema
- 
+
 A JSON Schema for the config file is published with the package. Add a
 `$schema` key to get autocompletion, hover docs, and validation in VS Code,
 WebStorm, Cursor, and other JSON-aware editors:
- 
+
 ```json
 {
   "$schema": "./node_modules/@nyaomaru/changelog-bot/public/config.schema.json",
   "provider": "anthropic"
 }
 ```
- 
+
 You can also point at the copy on GitHub:
-`https://raw.githubusercontent.com/nyaomaru/changelog-bot/main/public/config.schema.json`.
+`https://raw.githubusercontent.com/necoz-oss/changelog-bot/main/public/config.schema.json`.
 The `$schema` key is accepted and ignored by the CLI. Contributors can
 regenerate the schema after changing the config shape with
 `pnpm generate:schema`.
@@ -376,7 +378,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - uses: nyaomaru/changelog-bot@v0
+      - uses: necoz-oss/changelog-bot@v0
         with:
           changelog-path: CHANGELOG.md
           base-branch: main
@@ -427,7 +429,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - uses: nyaomaru/changelog-bot@v0
+      - uses: necoz-oss/changelog-bot@v0
         with:
           changelog-path: CHANGELOG.md
           base-branch: main
@@ -459,7 +461,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - uses: nyaomaru/changelog-bot@v0
+      - uses: necoz-oss/changelog-bot@v0
         with:
           release-tag: HEAD
           release-name: 0.5.0-preview
@@ -482,7 +484,7 @@ hand over.
 ```yaml
 jobs:
   changelog:
-    uses: nyaomaru/changelog-bot/.github/workflows/changelog.yaml@main
+    uses: necoz-oss/changelog-bot/.github/workflows/changelog.yaml@main
     permissions:
       contents: write
       pull-requests: write
@@ -613,7 +615,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - uses: nyaomaru/changelog-bot@v0
+      - uses: necoz-oss/changelog-bot@v0
         with:
           changelog-path: CHANGELOG.md
           base-branch: main
@@ -714,11 +716,11 @@ npx @nyaomaru/changelog-bot --help
   `^24.22.1`, and `^26.12.1`. Node.js 20 and earlier are unsupported. The
   bundled composite action installs Node.js `24.22.1` before running the CLI.
 - To pin versions:
-  - Action: use a major tag (`uses: nyaomaru/changelog-bot@v0`) or a specific ref (e.g., `@v0.1.2`).
+  - Action: use a major tag (`uses: necoz-oss/changelog-bot@v0`) or a specific ref (e.g., `@v0.1.2`).
   - Action + CLI pin: set `npm-version` input (e.g., `npm-version: 0.1.2`). Set `minimum-package-age-days` to a positive value when you want pnpm to block newly published package versions.
   - npx: `npx @nyaomaru/changelog-bot@0.1.2 ...`.
 - From `v1` onward, we follow SemVer: no breaking changes without a major version bump.
 
 <p align="center">
-    <img src="https://raw.githubusercontent.com/nyaomaru/changelog-bot/main/public/ChangelogBot_text.png" width="600px" align="center" alt="changelog-bot text" />
+    <img src="https://raw.githubusercontent.com/necoz-oss/changelog-bot/main/public/ChangelogBot_text.png" width="600px" align="center" alt="changelog-bot text" />
 </p>

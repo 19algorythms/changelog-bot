@@ -20,7 +20,7 @@ Instead, please report it through one of the following confidential channels:
 ### 1. GitHub Private Vulnerability Reporting (Preferred)
 
 If enabled on the repository, submit a confidential advisory directly via GitHub:
-👉 [Report a vulnerability](https://github.com/nyaomaru/changelog-bot/security/advisories/new)
+👉 [Report a vulnerability](https://github.com/necoz-oss/changelog-bot/security/advisories/new)
 
 This allows maintainers and reporters to discuss the issue, verify reproduction steps, and collaborate on a private fix before public disclosure.
 

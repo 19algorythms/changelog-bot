@@ -3,6 +3,11 @@ on:
   release:
     types: [published]
 
+# WHY: Repository default GITHUB_TOKEN permission is read. This job force-moves
+# the v0 tag, which needs contents write and nothing else.
+permissions:
+  contents: write
+
 jobs:
   move-v0:
     runs-on: ubuntu-latest

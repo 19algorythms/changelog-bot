@@ -194,4 +194,4 @@ Note: See `.github/prompts/jsdoc.prompt.md` for additional tone/phrasing inspira
 - Toolchain: Node 24.22.1 from `mise.toml`, pnpm `11.22.0` from `packageManager` via Corepack. After `mise install`, put that Node's `bin` first on `PATH` (`mise where node`).
 - Cloud agents set `core.hooksPath` for their git hooks. `pnpm install` runs `lefthook install` from `prepare`, and lefthook exits non-zero when that path is already set. In that case install with `pnpm install --frozen-lockfile --ignore-scripts`. Lint, test, and build do not need those hooks.
 - A dry-run needs `REPO_FULL_NAME` (or `GITHUB_REPOSITORY`) set to `owner/repo`. The CLI uses that value for compare links and does not read `git remote`. `GITHUB_TOKEN` and LLM API keys are optional with `--no-ai --dry-run`.
-- Hello-world after `pnpm build`: `REPO_FULL_NAME=nyaomaru/changelog-bot node dist/cli.js --release-tag HEAD --release-name 0.8.0-dev --no-ai --dry-run`.
+- Hello-world after `pnpm build`: `REPO_FULL_NAME=necoz-oss/changelog-bot node dist/cli.js --release-tag HEAD --release-name 0.8.0-dev --no-ai --dry-run`.
