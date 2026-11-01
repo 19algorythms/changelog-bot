@@ -358,6 +358,19 @@ action inputs to CLI flags. The caller must check out the repository first,
 preferably with `fetch-depth: 0` so tag and history lookups work. Pin `uses:` to
 a tag or commit for repeatable CI.
 
+### Repository move
+
+GitHub Actions does not follow repository redirects for actions or reusable
+workflows. A web or git redirect from `nyaomaru/changelog-bot` does not make an
+old `uses:` line work. The npm package remains `@nyaomaru/changelog-bot`.
+
+After this change is merged:
+
+1. Point composite Actions at `necoz-oss/changelog-bot@v0`, or at a specific tag such as `necoz-oss/changelog-bot@v0.11.0`. Those existing tags install `@nyaomaru/changelog-bot` and do not name the old owner in `action.yml`.
+2. Point reusable workflows at `necoz-oss/changelog-bot/.github/workflows/changelog.yaml@main`. On `main`, that workflow calls `necoz-oss/changelog-bot@v0`.
+3. Do not pin the reusable workflow to the current `v0` tag or to `v0.11.0`. Those tags still contain `uses: nyaomaru/changelog-bot@v0`, and Actions will not redirect it. Merging does not rewrite existing tags.
+4. The next published `v0.x.x` release moves the floating `v0` tag to that release commit. `v1.x.x` releases leave `v0` where it is. Until that `v0.x.x` release exists, keep reusable-workflow callers on `@main`.
+
 ### Release published workflow
 
 ```yaml
