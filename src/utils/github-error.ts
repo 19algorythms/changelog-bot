@@ -303,3 +303,33 @@ export function formatBranchMetadataFallbackReason(
     }
   }
 }
+
+/**
+ * Format a human-readable fallback reason when issue metadata lookups degrade.
+ * @param issueNumber Issue number associated with the failed lookup.
+ * @param failure Typed failure detail.
+ * @returns Formatted reason string.
+ */
+export function formatIssueMetadataFallbackReason(
+  issueNumber: number,
+  failure: MetadataLookupFailure,
+): string {
+  switch (failure.status) {
+    case 'not-found':
+      return `Skipped Issue #${issueNumber}: issue not found (404)`;
+    case 'unauthenticated':
+      return `Skipped Issue #${issueNumber}: GitHub authentication required or token invalid`;
+    case 'rate-limited':
+      return `Skipped Issue #${issueNumber}: GitHub API rate limit reached`;
+    case 'invalid-response':
+      return `Skipped Issue #${issueNumber}: invalid issue metadata received from GitHub`;
+    case 'network-error':
+      return `Skipped Issue #${issueNumber}: network error fetching issue metadata`;
+    default: {
+      const exhaustiveStatus: never = failure.status;
+      throw new Error(
+        `Unsupported metadata lookup failure status: ${String(exhaustiveStatus)}`,
+      );
+    }
+  }
+}

@@ -9,7 +9,10 @@ import type { ReleaseDraft, ReleaseOutcome } from '@/types/release.js';
 
 type ChangelogRunOutputDependencies = Pick<
   ChangelogRunDependencies,
-  'fetchPRDetails' | 'finalizeChangelogUpdate' | 'runWhyExtraction'
+  | 'fetchPRDetails'
+  | 'fetchIssueDetails'
+  | 'finalizeChangelogUpdate'
+  | 'runWhyExtraction'
 >;
 
 /** Parameters used to finalize and optionally enrich generated output. */
@@ -128,6 +131,7 @@ export async function finalizeChangelogRunOutput(
     token: params.token,
     githubApiBase: params.githubApiBase,
     fetchPRDetails: params.deps.fetchPRDetails,
+    fetchIssueDetails: params.deps.fetchIssueDetails,
   });
 
   if (whyOutput.llm !== finalized.llm) {

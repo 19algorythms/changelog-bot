@@ -1,5 +1,5 @@
 import { LlmError } from '@/lib/errors.js';
-import type { fetchPRDetails } from '@/lib/github.js';
+import type { fetchIssueDetails, fetchPRDetails } from '@/lib/github.js';
 import type { MetadataDiagnostics } from '@/types/github.js';
 import type { CliOptions } from '@/schema/cli.js';
 import type { LLMOutput } from '@/types/llm.js';
@@ -57,6 +57,8 @@ type RunWhyExtractionParams = {
   githubApiBase: string;
   /** Function used to fetch PR details. */
   fetchPRDetails: typeof fetchPRDetails;
+  /** Function used to fetch issue details. */
+  fetchIssueDetails?: typeof fetchIssueDetails;
 };
 
 export type RunWhyExtractionResult = {
@@ -144,6 +146,7 @@ export async function runWhyExtraction(
       githubApiBase: params.githubApiBase,
       maxCharsPerPr: cli.whyMaxCharsPerPr,
       fetchPRDetails: params.fetchPRDetails,
+      fetchIssueDetails: params.fetchIssueDetails,
     },
     targets,
   );

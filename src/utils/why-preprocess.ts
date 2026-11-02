@@ -4,7 +4,7 @@ import {
   WHY_RAW_BODY_SCAN_LIMIT,
 } from '@/constants/why.js';
 import type { WhyCanonicalSectionName } from '@/constants/why-section-aliases.js';
-import type { PullRequestDetails } from '@/types/github.js';
+import type { IssueDetails, PullRequestDetails } from '@/types/github.js';
 import type {
   WhyExtractionItem,
   WhyTarget,
@@ -31,7 +31,7 @@ const STRONG_CANONICAL_SECTION_NAMES = new Set<WhyCanonicalSectionName>([
 const RATIONALE_MARKER_RE =
   /\b(why|because|so that|in order to|reason|rationale|motivation|to avoid|to prevent|context|problem)\b|,\s*so\b/i;
 const PROBLEM_MARKER_RE =
-  /\b(fix|prevent|avoid|missing|broken|incorrect|regression|failure|bug|issue|risk|support|compatib|performance)\b/i;
+  /\b(fix|prevent|avoid|missing|broken|incorrect|regression|failure|bug|issue|risk|support|compatib|performance|leak|crash|error|exception)\b/i;
 const ISSUE_REF_RE =
   /(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#\d+|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/i;
 const NON_SIGNAL_RE = /\b(changelog|readme|typo|format|lint|refactor only)\b/i;
@@ -56,6 +56,36 @@ function trustBucketForScore(score: number): WhyTrustBucket {
   if (score >= WHY_MIN_MODEL_TRUST_SCORE) return 'medium';
   if (score > 0) return 'low';
   return 'none';
+}
+
+function boundSnippets(snippets: string[], maxCharsPerPr: number): string[] {
+  const bounded: string[] = [];
+  let usedChars = 0;
+  for (const snippet of snippets) {
+    const availableChars = maxCharsPerPr - usedChars;
+    if (availableChars <= 0) break;
+    bounded.push(snippet.slice(0, availableChars));
+    usedChars += snippet.length + 1;
+  }
+  return bounded;
+}
+
+/**
+ * Sanitize an issue description by stripping raw stack traces, error dumps, and large code blocks.
+ * @param body Raw issue description markdown.
+ * @returns Cleaned issue body suitable for rationale section extraction.
+ */
+export function sanitizeIssueBody(body: string): string {
+  // WHY: Issues often contain multi-line stack traces or console dumps inside code fences
+  // which pollute token budget without stating the underlying change rationale.
+  const withoutLargeCodeFences = body.replace(
+    /```[\s\S]*?```/g,
+    (codeBlock) => {
+      const lineCount = codeBlock.split('\n').length;
+      return lineCount > 3 ? '\n' : codeBlock;
+    },
+  );
+  return normalizeWhyBody(withoutLargeCodeFences);
 }
 
 function scoreCandidateMaterial(
@@ -130,16 +160,18 @@ function containsNonAscii(value: string): boolean {
 }
 
 /**
- * Convert a PR body into bounded WHY candidate snippets with local trust.
+ * Convert a PR body and optional linked issue material into bounded WHY candidate snippets with local trust.
  * @param target Changelog PR target.
  * @param details Pull request details fetched from GitHub.
  * @param options Preprocessing limits.
+ * @param linkedIssues Optional details of linked issues referenced by closing keywords.
  * @returns Provider-ready item or a skip reason.
  */
 export function preprocessWhyPrBody(
   target: WhyTarget,
   details: PullRequestDetails,
   options: PreprocessPrBodyOptions,
+  linkedIssues?: readonly IssueDetails[],
 ): PreprocessPrBodyResult {
   const title = target.changeId
     ? target.itemText
@@ -154,8 +186,40 @@ export function preprocessWhyPrBody(
     };
   }
 
-  const body = normalizeWhyBody(details.body).slice(0, WHY_RAW_BODY_SCAN_LIMIT);
-  if (!body) {
+  const rawPrBody = details.body ?? '';
+  const body = normalizeWhyBody(rawPrBody).slice(0, WHY_RAW_BODY_SCAN_LIMIT);
+
+  // Collect candidate sections and snippets from linked issues
+  const linkedIssueSections: ExtractedSection[] = [];
+  const linkedIssueCandidateLines: string[] = [];
+  if (linkedIssues && linkedIssues.length > 0) {
+    for (const linkedIssue of linkedIssues) {
+      const sanitizedIssueBody = sanitizeIssueBody(linkedIssue.body).slice(
+        0,
+        WHY_RAW_BODY_SCAN_LIMIT,
+      );
+      const extractedIssue = extractWhyTargetSections(sanitizedIssueBody);
+      linkedIssueSections.push(...extractedIssue.sections);
+
+      const issueSnippets = buildWhyCandidateSnippets(
+        extractedIssue.sections,
+        sanitizedIssueBody,
+        options.maxCharsPerPr,
+        !extractedIssue.hasTargetSection,
+      );
+
+      // WHY: The issue title provides high-signal context regarding the user-facing problem
+      const cleanIssueTitle = linkedIssue.title.replace(/\s+/g, ' ').trim();
+      if (cleanIssueTitle.length >= 16) {
+        linkedIssueCandidateLines.push(
+          `Issue #${linkedIssue.number}: ${cleanIssueTitle}`,
+        );
+      }
+      linkedIssueCandidateLines.push(...issueSnippets);
+    }
+  }
+
+  if (!body && linkedIssueCandidateLines.length === 0) {
     return {
       skippedReason: `Skipped PR #${target.prNumber}: empty PR description`,
       lowTrust: true,
@@ -165,7 +229,8 @@ export function preprocessWhyPrBody(
   const extracted = extractWhyTargetSections(body);
   if (
     !extracted.hasTargetSection &&
-    body.length > WHY_MAX_BODY_WITHOUT_TARGET_SECTION
+    body.length > WHY_MAX_BODY_WITHOUT_TARGET_SECTION &&
+    linkedIssueCandidateLines.length === 0
   ) {
     return {
       skippedReason: `Skipped PR #${target.prNumber}: PR description too large without target section`,
@@ -173,28 +238,47 @@ export function preprocessWhyPrBody(
     };
   }
 
-  const candidates = buildWhyCandidateSnippets(
+  const prCandidates = buildWhyCandidateSnippets(
     extracted.sections,
     body,
     options.maxCharsPerPr,
     !extracted.hasTargetSection,
   );
-  if (candidates.length === 0) {
+
+  const combinedCandidatePool = [...prCandidates, ...linkedIssueCandidateLines];
+
+  if (combinedCandidatePool.length === 0) {
     return {
       skippedReason: `Skipped PR #${target.prNumber}: no usable WHY candidate`,
       lowTrust: true,
     };
   }
 
+  // Deduplicate candidate lines while preserving order
+  const seenCandidates = new Set<string>();
+  const uniqueCandidates: string[] = [];
+  for (const candidate of combinedCandidatePool) {
+    const trimmed = candidate.trim();
+    if (trimmed && !seenCandidates.has(trimmed)) {
+      seenCandidates.add(trimmed);
+      uniqueCandidates.push(trimmed);
+    }
+  }
+
+  const candidates = boundSnippets(uniqueCandidates, options.maxCharsPerPr);
+  const combinedSections = [...extracted.sections, ...linkedIssueSections];
+  const combinedBodyForScoring = `${body}\n${linkedIssueCandidateLines.join('\n')}`;
+
   const trustScore = scoreCandidateMaterial(
-    extracted.sections,
+    combinedSections,
     candidates,
-    body,
+    combinedBodyForScoring,
   );
   const trustBucket = trustBucketForScore(trustScore);
   const requiresHighConfidence =
     containsNonAscii(candidates.join('\n')) &&
-    !hasStrongStructuralSignal(extracted.sections);
+    !hasStrongStructuralSignal(combinedSections);
+
   if (trustScore < WHY_MIN_MODEL_TRUST_SCORE) {
     return {
       skippedReason: `Skipped PR #${target.prNumber}: low local trust score (${trustScore})`,
