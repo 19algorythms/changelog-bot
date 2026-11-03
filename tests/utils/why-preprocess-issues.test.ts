@@ -105,4 +105,62 @@ describe('why-preprocess with linked issues', () => {
     expect(result.lowTrust).toBe(true);
     expect(result.skippedReason).toBeDefined();
   });
+
+  test('dropped issue section does not inflate trust score or structural signal', () => {
+    // WHY: If character budget drops a trailing ### Motivation section, its strong
+    // structural signal must not be counted in the local trust score.
+    const linkedIssue: IssueDetails = {
+      number: 237,
+      title:
+        'Documentation updates and clarifications across the entire repository',
+      body: [
+        '### Summary',
+        'This is a comprehensive summary of all documentation changes made across every single markdown file in the entire repository.',
+        '',
+        '### Motivation',
+        'Why this change is required urgently to prevent user confusion.',
+      ].join('\n'),
+      author: 'bob',
+      url: 'https://github.com/octo/repo/issues/237',
+    };
+
+    // Budget only allows the title and part of the summary; Motivation is dropped
+    const budgetConstrainedResult = preprocessWhyPrBody(
+      target,
+      details({ body: 'Fixes #237' }),
+      { maxCharsPerPr: 100 },
+      [linkedIssue],
+    );
+
+    // Budget allows both sections; Motivation is retained
+    const unconstrainedResult = preprocessWhyPrBody(
+      target,
+      details({ body: 'Fixes #237' }),
+      { maxCharsPerPr: 800 },
+      [linkedIssue],
+    );
+
+    expect(budgetConstrainedResult.item).toBeDefined();
+    expect(unconstrainedResult.item).toBeDefined();
+
+    // The unconstrained item has the strong 'motivation' section retained (+4 points)
+    expect(
+      (unconstrainedResult.item?.trustScore ?? 0) -
+        (budgetConstrainedResult.item?.trustScore ?? 0),
+    ).toBeGreaterThanOrEqual(4);
+  });
+
+  test('preserves inline Why label scoring from pull request description', () => {
+    const result = preprocessWhyPrBody(
+      target,
+      details({
+        body: 'Why: To prevent crash when processing malformed tokens in parser.',
+      }),
+      { maxCharsPerPr: 800 },
+    );
+
+    expect(result.item).toBeDefined();
+    // Strong canonical 'why' section (+4) + rationale marker (+3) + inline label bonus (+2) + problem marker (+2)
+    expect(result.item?.trustScore).toBeGreaterThanOrEqual(9);
+  });
 });

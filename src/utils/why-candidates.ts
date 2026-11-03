@@ -1,3 +1,4 @@
+import { MIN_WHY_CANDIDATE_LINE_LENGTH } from '@/constants/why.js';
 import {
   WHY_SECTION_ALIASES,
   type WhyCanonicalSectionName,
@@ -238,12 +239,18 @@ function hasUsableCandidateText(text: string): boolean {
     const line = cleanCandidateLine(rawLine);
     if (!line) continue;
     if (/^https?:\/\//i.test(line) || isPlaceholderLine(line)) continue;
-    if (line.replace(/\s+/g, ' ').trim().length >= 16) return true;
+    if (
+      line.replace(/\s+/g, ' ').trim().length >= MIN_WHY_CANDIDATE_LINE_LENGTH
+    )
+      return true;
   }
   return false;
 }
 
-function boundSnippets(snippets: string[], maxCharsPerPr: number): string[] {
+export function boundSnippets(
+  snippets: string[],
+  maxCharsPerPr: number,
+): string[] {
   const bounded: string[] = [];
   let usedChars = 0;
   for (const snippet of snippets) {
@@ -294,7 +301,7 @@ export function buildWhyCandidateSnippets(
     }
     for (const line of cleanedLines) {
       const compactLine = line.replace(/\s+/g, ' ').trim();
-      if (compactLine.length < 16) continue;
+      if (compactLine.length < MIN_WHY_CANDIDATE_LINE_LENGTH) continue;
       snippets.push(compactLine.slice(0, 240));
       if (snippets.join('\n').length >= maxCharsPerPr) {
         return boundSnippets(snippets, maxCharsPerPr);

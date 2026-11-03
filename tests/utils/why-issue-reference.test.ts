@@ -33,6 +33,28 @@ describe('why-issue-reference', () => {
     expect(extractLinkedIssueNumbers(body, repository)).toEqual([201]);
   });
 
+  test('extracts issue number from markdown target URL when label differs', () => {
+    // WHY: The destination URL is authoritative; misleading or mismatched link labels
+    // like [#201] pointing to issue 999 must extract 999, not 201.
+    const body =
+      'Fixes [#201](https://github.com/necoz-oss/changelog-bot/issues/999)';
+    expect(extractLinkedIssueNumbers(body, repository)).toEqual([999]);
+  });
+
+  test('ignores markdown link when destination points to external repository', () => {
+    // WHY: Prevent cross-repo closing links from accidentally resolving to current repo issues.
+    const body =
+      'Fixes [#201](https://github.com/other-org/other-repo/issues/201) and resolves #305';
+    expect(extractLinkedIssueNumbers(body, repository)).toEqual([305]);
+  });
+
+  test('ignores markdown link when destination points to a pull request', () => {
+    // WHY: PR links should not be treated as linked issues.
+    const body =
+      'Fixes [#201](https://github.com/necoz-oss/changelog-bot/pull/201)';
+    expect(extractLinkedIssueNumbers(body, repository)).toEqual([]);
+  });
+
   test('extracts issue number when matching full repo reference', () => {
     const body = 'Closes necoz-oss/changelog-bot#202';
     expect(extractLinkedIssueNumbers(body, repository)).toEqual([202]);

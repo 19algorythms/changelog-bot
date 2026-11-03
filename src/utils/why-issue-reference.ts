@@ -14,9 +14,11 @@ export type LinkedIssueRepository = {
 };
 
 // WHY: Match GitHub closing keywords preceding an issue reference or URL.
+// Handles Markdown links [label](url), direct URLs, or shorthand #123 / owner/repo#123.
+// For Markdown links, the target URL is authoritative rather than the anchor label.
 // See: https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue
 const CLOSING_KEYWORD_PATTERN =
-  /(?:\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?))\s*[:：]?\s*(?:(?<repoPrefix>[\w.-]+\/[\w.-]+)?#(?<issueNumber>\d+)|\[#(?<linkIssueNumber>\d+)\]\([^)]+\)|(?<issueUrl>https?:\/\/[^\s)]+\/issues\/(?<urlIssueNumber>\d+)\b))/gi;
+  /(?:\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?))\s*[:：]?\s*(?:\[[^\]]+\]\((?<markdownUrl>https?:\/\/[^\s)]+)\)|(?<issueUrl>https?:\/\/[^\s)]+\/issues\/(?<urlIssueNumber>\d+)\b)|(?:(?<repoPrefix>[\w.-]+\/[\w.-]+)?#(?<issueNumber>\d+)))/gi;
 
 const DIRECT_ISSUE_URL_PATTERN =
   /\b(?<issueUrl>https?:\/\/[^\s)]+\/issues\/(?<issueNumber>\d+)\b)/gi;
@@ -27,26 +29,30 @@ function parseIssueNumber(rawNumber: string | undefined): number | null {
   return isSafeInteger(parsedNumber) && parsedNumber > 0 ? parsedNumber : null;
 }
 
-function isCurrentRepositoryIssueUrl(
+function parseIssueNumberFromUrl(
   issueUrl: string | undefined,
   repository: LinkedIssueRepository,
-): boolean {
-  if (!issueUrl) return false;
+): number | null {
+  if (!issueUrl) return null;
   try {
     const parsedUrl = new URL(issueUrl);
     const expectedHost = repository.host ?? 'github.com';
     if (parsedUrl.hostname.toLowerCase() !== expectedHost.toLowerCase()) {
-      return false;
+      return null;
     }
     const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
-    return (
+    if (
+      pathSegments.length === 4 &&
       pathSegments[0]?.toLowerCase() === repository.owner.toLowerCase() &&
       pathSegments[1]?.toLowerCase() === repository.repo.toLowerCase() &&
       pathSegments[2]?.toLowerCase() === 'issues' &&
       /^\d+$/.test(pathSegments[3] ?? '')
-    );
+    ) {
+      return parseIssueNumber(pathSegments[3]);
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -66,8 +72,32 @@ export function extractLinkedIssueNumbers(
 
   const matchedIssueNumbers = new Set<number>();
 
-  // 1. Scan for closing keyword patterns (e.g. Fixes #123, closes owner/repo#456, resolves URL)
+  // 1. Scan for closing keyword patterns (e.g. Fixes #123, closes owner/repo#456, resolves URL or [label](URL))
   for (const match of body.matchAll(CLOSING_KEYWORD_PATTERN)) {
+    const markdownUrl = match.groups?.markdownUrl;
+    if (markdownUrl) {
+      const issueNumber = parseIssueNumberFromUrl(markdownUrl, repository);
+      if (issueNumber !== null) {
+        matchedIssueNumbers.add(issueNumber);
+        if (matchedIssueNumbers.size >= MAX_LINKED_ISSUES_PER_PR) {
+          return Array.from(matchedIssueNumbers);
+        }
+      }
+      continue;
+    }
+
+    const issueUrl = match.groups?.issueUrl;
+    if (issueUrl) {
+      const issueNumber = parseIssueNumberFromUrl(issueUrl, repository);
+      if (issueNumber !== null) {
+        matchedIssueNumbers.add(issueNumber);
+        if (matchedIssueNumbers.size >= MAX_LINKED_ISSUES_PER_PR) {
+          return Array.from(matchedIssueNumbers);
+        }
+      }
+      continue;
+    }
+
     const repoPrefix = match.groups?.repoPrefix;
     if (repoPrefix) {
       const expectedRepoPrefix =
@@ -77,16 +107,7 @@ export function extractLinkedIssueNumbers(
       }
     }
 
-    const issueUrl = match.groups?.issueUrl;
-    if (issueUrl && !isCurrentRepositoryIssueUrl(issueUrl, repository)) {
-      continue;
-    }
-
-    const rawNumber =
-      match.groups?.issueNumber ??
-      match.groups?.linkIssueNumber ??
-      match.groups?.urlIssueNumber;
-    const issueNumber = parseIssueNumber(rawNumber);
+    const issueNumber = parseIssueNumber(match.groups?.issueNumber);
     if (issueNumber !== null) {
       matchedIssueNumbers.add(issueNumber);
       if (matchedIssueNumbers.size >= MAX_LINKED_ISSUES_PER_PR) {
@@ -98,13 +119,11 @@ export function extractLinkedIssueNumbers(
   // 2. Scan for direct current-repository issue URLs in the text
   for (const match of body.matchAll(DIRECT_ISSUE_URL_PATTERN)) {
     const issueUrl = match.groups?.issueUrl;
-    if (isCurrentRepositoryIssueUrl(issueUrl, repository)) {
-      const issueNumber = parseIssueNumber(match.groups?.issueNumber);
-      if (issueNumber !== null) {
-        matchedIssueNumbers.add(issueNumber);
-        if (matchedIssueNumbers.size >= MAX_LINKED_ISSUES_PER_PR) {
-          return Array.from(matchedIssueNumbers);
-        }
+    const issueNumber = parseIssueNumberFromUrl(issueUrl, repository);
+    if (issueNumber !== null) {
+      matchedIssueNumbers.add(issueNumber);
+      if (matchedIssueNumbers.size >= MAX_LINKED_ISSUES_PER_PR) {
+        return Array.from(matchedIssueNumbers);
       }
     }
   }

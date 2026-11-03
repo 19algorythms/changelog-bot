@@ -1,4 +1,5 @@
 import {
+  MIN_WHY_CANDIDATE_LINE_LENGTH,
   WHY_MAX_BODY_WITHOUT_TARGET_SECTION,
   WHY_MIN_MODEL_TRUST_SCORE,
   WHY_RAW_BODY_SCAN_LIMIT,
@@ -12,6 +13,7 @@ import type {
 } from '@/types/why.js';
 import { isDependencyUpdateTitle } from '@/utils/dependency-update.js';
 import {
+  boundSnippets,
   buildWhyCandidateSnippets,
   extractWhyTargetSections,
   normalizeWhyBody,
@@ -31,7 +33,7 @@ const STRONG_CANONICAL_SECTION_NAMES = new Set<WhyCanonicalSectionName>([
 const RATIONALE_MARKER_RE =
   /\b(why|because|so that|in order to|reason|rationale|motivation|to avoid|to prevent|context|problem)\b|,\s*so\b/i;
 const PROBLEM_MARKER_RE =
-  /\b(fix|prevent|avoid|missing|broken|incorrect|regression|failure|bug|issue|risk|support|compatib|performance|leak|crash|error|exception)\b/i;
+  /\b(fix|prevent|avoid|missing|broken|incorrect|regression|failure|bug|issue|risk|support|compatib|performance|leak|crash)\b/i;
 const ISSUE_REF_RE =
   /(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#\d+|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/i;
 const NON_SIGNAL_RE = /\b(changelog|readme|typo|format|lint|refactor only)\b/i;
@@ -56,18 +58,6 @@ function trustBucketForScore(score: number): WhyTrustBucket {
   if (score >= WHY_MIN_MODEL_TRUST_SCORE) return 'medium';
   if (score > 0) return 'low';
   return 'none';
-}
-
-function boundSnippets(snippets: string[], maxCharsPerPr: number): string[] {
-  const bounded: string[] = [];
-  let usedChars = 0;
-  for (const snippet of snippets) {
-    const availableChars = maxCharsPerPr - usedChars;
-    if (availableChars <= 0) break;
-    bounded.push(snippet.slice(0, availableChars));
-    usedChars += snippet.length + 1;
-  }
-  return bounded;
 }
 
 /**
@@ -190,7 +180,10 @@ export function preprocessWhyPrBody(
   const body = normalizeWhyBody(rawPrBody).slice(0, WHY_RAW_BODY_SCAN_LIMIT);
 
   // Collect candidate sections and snippets from linked issues
-  const linkedIssueSections: ExtractedSection[] = [];
+  const linkedIssueSectionEntries: Array<{
+    section: ExtractedSection;
+    snippets: string[];
+  }> = [];
   const linkedIssueCandidateLines: string[] = [];
   if (linkedIssues && linkedIssues.length > 0) {
     for (const linkedIssue of linkedIssues) {
@@ -199,23 +192,38 @@ export function preprocessWhyPrBody(
         WHY_RAW_BODY_SCAN_LIMIT,
       );
       const extractedIssue = extractWhyTargetSections(sanitizedIssueBody);
-      linkedIssueSections.push(...extractedIssue.sections);
-
-      const issueSnippets = buildWhyCandidateSnippets(
-        extractedIssue.sections,
-        sanitizedIssueBody,
-        options.maxCharsPerPr,
-        !extractedIssue.hasTargetSection,
-      );
 
       // WHY: The issue title provides high-signal context regarding the user-facing problem
       const cleanIssueTitle = linkedIssue.title.replace(/\s+/g, ' ').trim();
-      if (cleanIssueTitle.length >= 16) {
+      if (cleanIssueTitle.length >= MIN_WHY_CANDIDATE_LINE_LENGTH) {
         linkedIssueCandidateLines.push(
           `Issue #${linkedIssue.number}: ${cleanIssueTitle}`,
         );
       }
-      linkedIssueCandidateLines.push(...issueSnippets);
+
+      if (extractedIssue.sections.length > 0) {
+        for (const section of extractedIssue.sections) {
+          const sectionSnippets = buildWhyCandidateSnippets(
+            [section],
+            section.text,
+            options.maxCharsPerPr,
+            false,
+          );
+          linkedIssueSectionEntries.push({
+            section,
+            snippets: sectionSnippets,
+          });
+          linkedIssueCandidateLines.push(...sectionSnippets);
+        }
+      } else {
+        const issueSnippets = buildWhyCandidateSnippets(
+          [],
+          sanitizedIssueBody,
+          options.maxCharsPerPr,
+          true,
+        );
+        linkedIssueCandidateLines.push(...issueSnippets);
+      }
     }
   }
 
@@ -266,7 +274,21 @@ export function preprocessWhyPrBody(
   }
 
   const candidates = boundSnippets(uniqueCandidates, options.maxCharsPerPr);
-  const combinedSections = [...extracted.sections, ...linkedIssueSections];
+
+  // WHY: Retain only issue sections whose snippets actually made it into the bounded candidates.
+  // If a section like ### Motivation was dropped due to character budget, it should not
+  // inflate the trust score or satisfy hasStrongStructuralSignal.
+  const effectiveIssueSections = linkedIssueSectionEntries
+    .filter((entry) =>
+      entry.snippets.some((snippet) =>
+        candidates.some(
+          (candidate) => candidate.length > 0 && snippet.startsWith(candidate),
+        ),
+      ),
+    )
+    .map((entry) => entry.section);
+
+  const combinedSections = [...extracted.sections, ...effectiveIssueSections];
   const combinedBodyForScoring = `${body}\n${linkedIssueCandidateLines.join('\n')}`;
 
   const trustScore = scoreCandidateMaterial(
