@@ -83,6 +83,24 @@ describe('why-issue-reference', () => {
     expect(extractLinkedIssueNumbers(body, repository)).toEqual([503]);
   });
 
+  test('ignores issue references inside HTML comments and code blocks', () => {
+    // WHY: Template guidance like "<!-- Fixes #111 and closes #222 -->" or code examples
+    // must not consume the MAX_LINKED_ISSUES_PER_PR budget or overshadow actual closing keywords.
+    const body = [
+      '<!-- Example: Fixes #111 and closes #222 -->',
+      '',
+      'Fixes #333',
+      '',
+      '```sh',
+      '# git commit -m "Fixes #444 and closes #555"',
+      '```',
+      '',
+      'Also tested with `Fixes #666` in inline code.',
+    ].join('\n');
+
+    expect(extractLinkedIssueNumbers(body, repository)).toEqual([333]);
+  });
+
   test('deduplicates issue references in the same PR description', () => {
     const body = 'Fixes #601 and also resolves #601, see #601';
     expect(extractLinkedIssueNumbers(body, repository)).toEqual([601]);

@@ -13,7 +13,6 @@ import type {
 } from '@/types/why.js';
 import { isDependencyUpdateTitle } from '@/utils/dependency-update.js';
 import {
-  boundSnippets,
   buildWhyCandidateSnippets,
   extractWhyTargetSections,
   normalizeWhyBody,
@@ -39,6 +38,10 @@ const ISSUE_REF_RE =
 const NON_SIGNAL_RE = /\b(changelog|readme|typo|format|lint|refactor only)\b/i;
 const BOT_AUTHOR_RE = /(?:\[bot\]|bot$|renovate|dependabot)/i;
 
+// WHY: Reserve a portion of candidate budget for linked issues so voluminous PR descriptions
+// do not starve issue rationale, while still prioritizing explicit PR rationale sections.
+const LINKED_ISSUE_RESERVED_RATIO = 0.35;
+
 type PreprocessPrBodyOptions = {
   /** Maximum candidate characters to keep for this PR. */
   maxCharsPerPr: number;
@@ -51,6 +54,22 @@ type PreprocessPrBodyResult = {
   skippedReason?: string;
   /** Whether the skipped item failed trust thresholds. */
   lowTrust: boolean;
+};
+
+type CandidateOrigin =
+  | { kind: 'pr'; section?: ExtractedSection; isStrong: boolean }
+  | { kind: 'issue-title'; issueNumber: number }
+  | {
+      kind: 'issue-section';
+      issueNumber: number;
+      section: ExtractedSection;
+      isStrong: boolean;
+    }
+  | { kind: 'issue-body'; issueNumber: number };
+
+type CandidateEntry = {
+  text: string;
+  origin: CandidateOrigin;
 };
 
 function trustBucketForScore(score: number): WhyTrustBucket {
@@ -180,54 +199,61 @@ export function preprocessWhyPrBody(
   const body = normalizeWhyBody(rawPrBody).slice(0, WHY_RAW_BODY_SCAN_LIMIT);
 
   // Collect candidate sections and snippets from linked issues
-  const linkedIssueSectionEntries: Array<{
-    section: ExtractedSection;
-    snippets: string[];
-  }> = [];
-  const linkedIssueCandidateLines: string[] = [];
+  const issueEntries: CandidateEntry[] = [];
   if (linkedIssues && linkedIssues.length > 0) {
     for (const linkedIssue of linkedIssues) {
       const sanitizedIssueBody = sanitizeIssueBody(linkedIssue.body).slice(
         0,
         WHY_RAW_BODY_SCAN_LIMIT,
       );
-      const extractedIssue = extractWhyTargetSections(sanitizedIssueBody);
-
-      // WHY: The issue title provides high-signal context regarding the user-facing problem
       const cleanIssueTitle = linkedIssue.title.replace(/\s+/g, ' ').trim();
       if (cleanIssueTitle.length >= MIN_WHY_CANDIDATE_LINE_LENGTH) {
-        linkedIssueCandidateLines.push(
-          `Issue #${linkedIssue.number}: ${cleanIssueTitle}`,
-        );
+        issueEntries.push({
+          text: `Issue #${linkedIssue.number}: ${cleanIssueTitle}`,
+          origin: { kind: 'issue-title', issueNumber: linkedIssue.number },
+        });
       }
 
+      const extractedIssue = extractWhyTargetSections(sanitizedIssueBody);
       if (extractedIssue.sections.length > 0) {
         for (const section of extractedIssue.sections) {
-          const sectionSnippets = buildWhyCandidateSnippets(
+          const isStrong = STRONG_CANONICAL_SECTION_NAMES.has(section.name);
+          const snippets = buildWhyCandidateSnippets(
             [section],
             section.text,
             options.maxCharsPerPr,
             false,
           );
-          linkedIssueSectionEntries.push({
-            section,
-            snippets: sectionSnippets,
-          });
-          linkedIssueCandidateLines.push(...sectionSnippets);
+          for (const snippet of snippets) {
+            issueEntries.push({
+              text: snippet,
+              origin: {
+                kind: 'issue-section',
+                issueNumber: linkedIssue.number,
+                section,
+                isStrong,
+              },
+            });
+          }
         }
-      } else {
-        const issueSnippets = buildWhyCandidateSnippets(
+      } else if (!extractedIssue.hasTargetSection) {
+        const fallbackSnippets = buildWhyCandidateSnippets(
           [],
           sanitizedIssueBody,
           options.maxCharsPerPr,
           true,
         );
-        linkedIssueCandidateLines.push(...issueSnippets);
+        for (const snippet of fallbackSnippets) {
+          issueEntries.push({
+            text: snippet,
+            origin: { kind: 'issue-body', issueNumber: linkedIssue.number },
+          });
+        }
       }
     }
   }
 
-  if (!body && linkedIssueCandidateLines.length === 0) {
+  if (!body && issueEntries.length === 0) {
     return {
       skippedReason: `Skipped PR #${target.prNumber}: empty PR description`,
       lowTrust: true,
@@ -238,7 +264,7 @@ export function preprocessWhyPrBody(
   if (
     !extracted.hasTargetSection &&
     body.length > WHY_MAX_BODY_WITHOUT_TARGET_SECTION &&
-    linkedIssueCandidateLines.length === 0
+    issueEntries.length === 0
   ) {
     return {
       skippedReason: `Skipped PR #${target.prNumber}: PR description too large without target section`,
@@ -246,50 +272,134 @@ export function preprocessWhyPrBody(
     };
   }
 
-  const prCandidates = buildWhyCandidateSnippets(
-    extracted.sections,
-    body,
-    options.maxCharsPerPr,
-    !extracted.hasTargetSection,
-  );
+  const prEntries: CandidateEntry[] = [];
+  if (extracted.sections.length > 0) {
+    for (const section of extracted.sections) {
+      const isStrong = STRONG_CANONICAL_SECTION_NAMES.has(section.name);
+      const snippets = buildWhyCandidateSnippets(
+        [section],
+        section.text,
+        options.maxCharsPerPr,
+        false,
+      );
+      for (const snippet of snippets) {
+        prEntries.push({
+          text: snippet,
+          origin: { kind: 'pr', section, isStrong },
+        });
+      }
+    }
+  } else if (!extracted.hasTargetSection && body) {
+    const fallbackSnippets = buildWhyCandidateSnippets(
+      [],
+      body,
+      options.maxCharsPerPr,
+      true,
+    );
+    for (const snippet of fallbackSnippets) {
+      prEntries.push({
+        text: snippet,
+        origin: { kind: 'pr', isStrong: false },
+      });
+    }
+  }
 
-  const combinedCandidatePool = [...prCandidates, ...linkedIssueCandidateLines];
+  // Assemble candidate pool: prioritize explicit rationale and reserve budget for linked issues
+  let candidatePool: CandidateEntry[];
+  if (issueEntries.length === 0) {
+    candidatePool = prEntries;
+  } else {
+    const prStrongEntries = prEntries.filter(
+      (entry) => entry.origin.kind === 'pr' && entry.origin.isStrong,
+    );
+    const prGeneralEntries = prEntries.filter(
+      (entry) => entry.origin.kind === 'pr' && !entry.origin.isStrong,
+    );
 
-  if (combinedCandidatePool.length === 0) {
+    // WHY: Bound PR strong candidates to ensure linked issue evidence has reserved space
+    const reservedIssueBudget = Math.max(
+      Math.floor(options.maxCharsPerPr * LINKED_ISSUE_RESERVED_RATIO),
+      MIN_WHY_CANDIDATE_LINE_LENGTH,
+    );
+    const maxPrStrongBudget = Math.max(
+      options.maxCharsPerPr - reservedIssueBudget,
+      MIN_WHY_CANDIDATE_LINE_LENGTH,
+    );
+
+    const boundedPrStrongEntries: CandidateEntry[] = [];
+    let prStrongChars = 0;
+    for (const entry of prStrongEntries) {
+      if (
+        prStrongChars + entry.text.length + 1 > maxPrStrongBudget &&
+        boundedPrStrongEntries.length > 0
+      ) {
+        break;
+      }
+      boundedPrStrongEntries.push(entry);
+      prStrongChars += entry.text.length + 1;
+    }
+
+    candidatePool = [
+      ...boundedPrStrongEntries,
+      ...issueEntries,
+      ...prGeneralEntries,
+    ];
+  }
+
+  if (candidatePool.length === 0) {
     return {
       skippedReason: `Skipped PR #${target.prNumber}: no usable WHY candidate`,
       lowTrust: true,
     };
   }
 
-  // Deduplicate candidate lines while preserving order
+  // Deduplicate candidate lines while preserving order and source tracking
   const seenCandidates = new Set<string>();
-  const uniqueCandidates: string[] = [];
-  for (const candidate of combinedCandidatePool) {
-    const trimmed = candidate.trim();
+  const uniqueCandidateEntries: CandidateEntry[] = [];
+  for (const entry of candidatePool) {
+    const trimmed = entry.text.trim();
     if (trimmed && !seenCandidates.has(trimmed)) {
       seenCandidates.add(trimmed);
-      uniqueCandidates.push(trimmed);
+      uniqueCandidateEntries.push(entry);
     }
   }
 
-  const candidates = boundSnippets(uniqueCandidates, options.maxCharsPerPr);
+  const boundedEntries: Array<{ entry: CandidateEntry; text: string }> = [];
+  let usedChars = 0;
+  for (const candidateEntry of uniqueCandidateEntries) {
+    const availableChars = options.maxCharsPerPr - usedChars;
+    if (availableChars <= 0) break;
+    if (candidateEntry.text.length <= availableChars) {
+      boundedEntries.push({ entry: candidateEntry, text: candidateEntry.text });
+      usedChars += candidateEntry.text.length + 1;
+    } else {
+      const slicedText = candidateEntry.text.slice(0, availableChars);
+      if (slicedText.length >= MIN_WHY_CANDIDATE_LINE_LENGTH) {
+        boundedEntries.push({ entry: candidateEntry, text: slicedText });
+      }
+      break;
+    }
+  }
 
-  // WHY: Retain only issue sections whose snippets actually made it into the bounded candidates.
-  // If a section like ### Motivation was dropped due to character budget, it should not
-  // inflate the trust score or satisfy hasStrongStructuralSignal.
-  const effectiveIssueSections = linkedIssueSectionEntries
-    .filter((entry) =>
-      entry.snippets.some((snippet) =>
-        candidates.some(
-          (candidate) => candidate.length > 0 && snippet.startsWith(candidate),
-        ),
-      ),
-    )
-    .map((entry) => entry.section);
+  const candidates = boundedEntries.map((b) => b.text);
+
+  // WHY: Retain only issue sections that actually contributed usable candidates to the final bounded pool.
+  // Using direct origin tracking avoids false attribution from text matching or deduplicated PR candidates,
+  // and ensures heavily truncated snippets (< MIN_WHY_CANDIDATE_LINE_LENGTH) do not grant unearned trust credit.
+  const effectiveIssueSections = Array.from(
+    new Set(
+      boundedEntries
+        .filter(
+          (b) =>
+            b.entry.origin.kind === 'issue-section' &&
+            b.text.length >= MIN_WHY_CANDIDATE_LINE_LENGTH,
+        )
+        .map((b) => (b.entry.origin as { section: ExtractedSection }).section),
+    ),
+  );
 
   const combinedSections = [...extracted.sections, ...effectiveIssueSections];
-  const combinedBodyForScoring = `${body}\n${linkedIssueCandidateLines.join('\n')}`;
+  const combinedBodyForScoring = `${body}\n${issueEntries.map((e) => e.text).join('\n')}`;
 
   const trustScore = scoreCandidateMaterial(
     combinedSections,

@@ -56,6 +56,16 @@ function parseIssueNumberFromUrl(
   }
 }
 
+// WHY: Exclude HTML comments (such as PR templates e.g. "<!-- Fixes #123 -->")
+// and code blocks/spans so non-authoritative references do not consume MAX_LINKED_ISSUES_PER_PR.
+function stripIgnoredIssueReferenceMarkup(body: string): string {
+  return body
+    .replace(/<!--[\s\S]*?-->/g, '\n')
+    .replace(/```[\s\S]*?```/g, '\n')
+    .replace(/~~~[\s\S]*?~~~/g, '\n')
+    .replace(/`[^`\n]*`/g, ' ');
+}
+
 /**
  * Extract authoritative linked issue numbers referenced in a PR body.
  * WHY: Closing keywords (e.g. "Fixes #123") and direct issue URLs in the target repo
@@ -70,10 +80,11 @@ export function extractLinkedIssueNumbers(
 ): number[] {
   if (!body) return [];
 
+  const cleanBody = stripIgnoredIssueReferenceMarkup(body);
   const matchedIssueNumbers = new Set<number>();
 
   // 1. Scan for closing keyword patterns (e.g. Fixes #123, closes owner/repo#456, resolves URL or [label](URL))
-  for (const match of body.matchAll(CLOSING_KEYWORD_PATTERN)) {
+  for (const match of cleanBody.matchAll(CLOSING_KEYWORD_PATTERN)) {
     const markdownUrl = match.groups?.markdownUrl;
     if (markdownUrl) {
       const issueNumber = parseIssueNumberFromUrl(markdownUrl, repository);
@@ -117,7 +128,7 @@ export function extractLinkedIssueNumbers(
   }
 
   // 2. Scan for direct current-repository issue URLs in the text
-  for (const match of body.matchAll(DIRECT_ISSUE_URL_PATTERN)) {
+  for (const match of cleanBody.matchAll(DIRECT_ISSUE_URL_PATTERN)) {
     const issueUrl = match.groups?.issueUrl;
     const issueNumber = parseIssueNumberFromUrl(issueUrl, repository);
     if (issueNumber !== null) {

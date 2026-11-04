@@ -163,4 +163,80 @@ describe('why-preprocess with linked issues', () => {
     // Strong canonical 'why' section (+4) + rationale marker (+3) + inline label bonus (+2) + problem marker (+2)
     expect(result.item?.trustScore).toBeGreaterThanOrEqual(9);
   });
+
+  test('retains linked issue evidence even when PR candidates fill character budget', () => {
+    // WHY: Voluminous PR descriptions must not starve linked issue rationale from reaching the model.
+    const longPrBody = [
+      '### Description',
+      'This is an extensive description of the PR that goes on and on to consume all available characters in the candidate budget limit.',
+      'It contains multiple long paragraphs explaining various implementation aspects of the refactoring and cleanup work done here.',
+    ].join('\n');
+
+    const linkedIssue: IssueDetails = {
+      number: 238,
+      title: 'Buffer overflow when parsing malformed headers',
+      body: [
+        '### Problem',
+        'Large header inputs overflow the allocated parser buffer and cause segmentation faults.',
+      ].join('\n'),
+      author: 'bob',
+      url: 'https://github.com/octo/repo/issues/238',
+    };
+
+    const result = preprocessWhyPrBody(
+      target,
+      details({ body: `${longPrBody}\n\nFixes #238` }),
+      { maxCharsPerPr: 250 },
+      [linkedIssue],
+    );
+
+    expect(result.item).toBeDefined();
+    const joinedCandidates = result.item?.candidates.join('\n') ?? '';
+    // Both PR candidate text and issue evidence must be present
+    expect(joinedCandidates).toContain('This is an extensive description');
+    expect(joinedCandidates).toContain('Issue #238: Buffer overflow');
+  });
+
+  test('does not falsely credit issue section when duplicate text exists in weak PR section', () => {
+    // WHY: Deduplication should not attribute strong issue section trust to a PR when
+    // identical text comes from a weaker PR section.
+    const duplicateSentence =
+      'Refactored parser to avoid crash when processing malformed token streams.';
+
+    const linkedIssue: IssueDetails = {
+      number: 239,
+      title: 'Parser crash during malformed stream handling',
+      body: ['### Motivation', duplicateSentence].join('\n'),
+      author: 'bob',
+      url: 'https://github.com/octo/repo/issues/239',
+    };
+
+    // PR has only a weak 'Summary' section with the duplicate sentence
+    const prOnlyResult = preprocessWhyPrBody(
+      target,
+      details({
+        body: `### Summary\n${duplicateSentence}`,
+      }),
+      { maxCharsPerPr: 800 },
+    );
+
+    // Linked issue has the duplicate sentence under strong 'Motivation'
+    const withIssueResult = preprocessWhyPrBody(
+      target,
+      details({
+        body: `### Summary\n${duplicateSentence}\n\nFixes #239`,
+      }),
+      { maxCharsPerPr: 800 },
+      [linkedIssue],
+    );
+
+    expect(prOnlyResult.item).toBeDefined();
+    expect(withIssueResult.item).toBeDefined();
+
+    // Verify deduplication: duplicateSentence should appear only once in candidates
+    const matches = withIssueResult.item?.candidates.filter(
+      (c) => c === duplicateSentence,
+    );
+    expect(matches).toHaveLength(1);
+  });
 });
