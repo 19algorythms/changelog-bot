@@ -15,6 +15,9 @@ export const DEFAULT_WHY_MAX_PRS = 30;
 /** Maximum preprocessed candidate characters sent per PR by default. */
 export const DEFAULT_WHY_MAX_CHARS_PER_PR = 800;
 
+/** Minimum line character length for usable WHY candidate snippets. */
+export const MIN_WHY_CANDIDATE_LINE_LENGTH = 16;
+
 /** Minimum accepted model confidence by default. */
 export const DEFAULT_WHY_CONFIDENCE = 'medium' as const;
 

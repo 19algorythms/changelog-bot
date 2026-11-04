@@ -1,14 +1,20 @@
 import { GITHUB_METADATA_CONCURRENCY } from '@/constants/github.js';
 import { WHY_MAX_TOTAL_PAYLOAD_CHARS } from '@/constants/why.js';
+import { fetchIssueDetails as defaultFetchIssueDetails } from '@/lib/github-issues.js';
 import type { fetchPRDetails } from '@/lib/github.js';
-import type { MetadataDiagnostics } from '@/types/github.js';
+import { githubWebHost } from '@/lib/why-extraction-notes.js';
+import type { IssueDetails, MetadataDiagnostics } from '@/types/github.js';
 import type { WhyExtractionItem, WhyTarget } from '@/types/why.js';
 import { mapConcurrent } from '@/utils/concurrency.js';
-import { formatMetadataFallbackReason } from '@/utils/github-error.js';
+import {
+  formatIssueMetadataFallbackReason,
+  formatMetadataFallbackReason,
+} from '@/utils/github-error.js';
 import {
   createMetadataDiagnostics,
   recordMetadataLookupOutcome,
 } from '@/utils/metadata-diagnostics.js';
+import { extractLinkedIssueNumbers } from '@/utils/why-issue-reference.js';
 import { preprocessWhyPrBody } from '@/utils/why-preprocess.js';
 
 type CollectWhyExtractionItemsParams = {
@@ -18,6 +24,7 @@ type CollectWhyExtractionItemsParams = {
   githubApiBase: string;
   maxCharsPerPr: number;
   fetchPRDetails: typeof fetchPRDetails;
+  fetchIssueDetails?: typeof defaultFetchIssueDetails;
   concurrency?: number;
 };
 
@@ -88,6 +95,66 @@ export async function collectWhyExtractionItems(
     }
   }
 
+  // Scan successfully fetched PR bodies for linked issue references
+  const linkedIssueFetcher =
+    params.fetchIssueDetails ?? defaultFetchIssueDetails;
+  const repositoryContext = {
+    owner: params.owner,
+    repo: params.repo,
+    host: githubWebHost(params.githubApiBase),
+  };
+  const linkedIssueNumbersByPr = new Map<number, number[]>();
+  const allUniqueLinkedIssueNumbers = new Set<number>();
+
+  for (const [prNumber, lookup] of lookups) {
+    if (lookup.status !== 'success') continue;
+    const issueNumbers = extractLinkedIssueNumbers(
+      lookup.data.body,
+      repositoryContext,
+    );
+    if (issueNumbers.length > 0) {
+      linkedIssueNumbersByPr.set(prNumber, issueNumbers);
+      for (const issueNumber of issueNumbers) {
+        allUniqueLinkedIssueNumbers.add(issueNumber);
+      }
+    }
+  }
+
+  // Fetch linked issues concurrently, bounded by GITHUB_METADATA_CONCURRENCY
+  const issueLookupByNumber = new Map<
+    number,
+    Awaited<ReturnType<typeof linkedIssueFetcher>>
+  >();
+  if (allUniqueLinkedIssueNumbers.size > 0) {
+    const issueLookups = await mapConcurrent(
+      Array.from(allUniqueLinkedIssueNumbers),
+      params.concurrency ?? GITHUB_METADATA_CONCURRENCY,
+      async (issueNumber) => {
+        const issueLookup = await linkedIssueFetcher(
+          params.owner,
+          params.repo,
+          issueNumber,
+          params.token,
+          params.githubApiBase,
+        );
+        return [issueNumber, issueLookup] as const;
+      },
+    );
+
+    for (const [issueNumber, issueLookup] of issueLookups) {
+      issueLookupByNumber.set(issueNumber, issueLookup);
+      const fallbackReason =
+        issueLookup.status !== 'success'
+          ? formatIssueMetadataFallbackReason(issueNumber, issueLookup)
+          : undefined;
+      recordMetadataLookupOutcome(
+        metadataDiagnostics,
+        issueLookup,
+        fallbackReason,
+      );
+    }
+  }
+
   for (const target of targets) {
     const lookup = lookupByPrNumber.get(target.prNumber);
     if (!lookup || lookup.status !== 'success') {
@@ -98,9 +165,22 @@ export async function collectWhyExtractionItems(
       continue;
     }
 
-    const preprocessed = preprocessWhyPrBody(target, lookup.data, {
-      maxCharsPerPr: params.maxCharsPerPr,
-    });
+    const linkedIssueNumbers =
+      linkedIssueNumbersByPr.get(target.prNumber) ?? [];
+    const targetLinkedIssues: IssueDetails[] = [];
+    for (const issueNumber of linkedIssueNumbers) {
+      const issueLookup = issueLookupByNumber.get(issueNumber);
+      if (issueLookup && issueLookup.status === 'success') {
+        targetLinkedIssues.push(issueLookup.data);
+      }
+    }
+
+    const preprocessed = preprocessWhyPrBody(
+      target,
+      lookup.data,
+      { maxCharsPerPr: params.maxCharsPerPr },
+      targetLinkedIssues,
+    );
     if (preprocessed.item) {
       result.items.push(preprocessed.item);
       continue;

@@ -7,6 +7,7 @@ import {
 import { writeChangelog } from '@/lib/changelog.js';
 import { createPR } from '@/lib/pr.js';
 import {
+  fetchIssueDetails,
   fetchPRDetails,
   fetchPullRequestsForBranch,
   fetchPullRequestsForBranchResult,
@@ -61,6 +62,8 @@ export type ChangelogRunDependencies = {
   fetchReleaseBodyResult?: typeof fetchReleaseBodyResult;
   /** Fetch GitHub PR title/body/author details. */
   fetchPRDetails: typeof fetchPRDetails;
+  /** Fetch GitHub issue title/body/author details. */
+  fetchIssueDetails: typeof fetchIssueDetails;
   /** Fetch the open pull request associated with the current branch. */
   fetchPullRequestsForBranch: typeof fetchPullRequestsForBranch;
   /** Fetch the open pull request associated with the current branch with structured result. */
@@ -102,6 +105,7 @@ const defaultDependencies: ChangelogRunDependencies = {
   fetchReleaseBody,
   fetchReleaseBodyResult,
   fetchPRDetails,
+  fetchIssueDetails,
   fetchPullRequestsForBranch,
   fetchPullRequestsForBranchResult,
   resolveCustomInstructionsWithDiagnostics,

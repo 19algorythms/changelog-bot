@@ -13,3 +13,4 @@ export {
   prsForCommitData,
   type MapCommitsToPrsResult,
 } from '@/lib/github-pulls.js';
+export { fetchIssueDetails } from '@/lib/github-issues.js';

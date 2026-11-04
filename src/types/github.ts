@@ -49,6 +49,20 @@ export type PullRequestDetails = {
   url?: string;
 };
 
+/** Normalized issue details used by WHY extraction. */
+export type IssueDetails = {
+  /** Numeric issue identifier. */
+  number: number;
+  /** Issue title. */
+  title: string;
+  /** Issue markdown body. */
+  body: string;
+  /** GitHub login/username for the issue author. */
+  author?: string;
+  /** HTML URL of the issue. */
+  url?: string;
+};
+
 /** Item returned when listing PRs associated with a commit. */
 export type GitHubCommitPullsItem = {
   /** Numeric PR identifier. */

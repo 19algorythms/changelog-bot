@@ -18,6 +18,21 @@ export const GitHubPRInfoSchema = z.object({
   html_url: z.string().optional(),
 });
 
+// WHY: Validate GitHub Issue responses. The GitHub REST API shares endpoints
+// between issues and pull requests; the presence of pull_request distinguishes PRs.
+export const GitHubIssueInfoSchema = z.object({
+  number: z.number().optional(),
+  title: z.string().optional(),
+  body: z.string().nullable().optional(),
+  user: z
+    .object({
+      login: z.string().optional(),
+    })
+    .optional(),
+  html_url: z.string().optional(),
+  pull_request: z.unknown().optional(),
+});
+
 export const GitHubCommitPullsItemSchema = z.object({
   number: z.number(),
   title: z.string().optional(),
@@ -35,6 +50,7 @@ export const GitHubCommitPullsArraySchema = z.array(
 
 export type GitHubReleaseByTagParsed = z.infer<typeof GitHubReleaseByTagSchema>;
 export type GitHubPRInfoParsed = z.infer<typeof GitHubPRInfoSchema>;
+export type GitHubIssueInfoParsed = z.infer<typeof GitHubIssueInfoSchema>;
 export type GitHubCommitPullsItemParsed = z.infer<
   typeof GitHubCommitPullsItemSchema
 >;

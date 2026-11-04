@@ -5,6 +5,7 @@ import {
   classifyGithubError,
   formatBranchMetadataFallbackReason,
   formatCommitMetadataFallbackReason,
+  formatIssueMetadataFallbackReason,
   formatMetadataFallbackReason,
   formatReleaseMetadataFallbackReason,
 } from '@/utils/github-error.js';
@@ -337,5 +338,65 @@ describe('formatReleaseMetadataFallbackReason', () => {
       message: 'Network offline',
     });
     expect(reason).toBe('Release v1.0.0: network error fetching release notes');
+  });
+});
+
+describe('formatIssueMetadataFallbackReason', () => {
+  test('formats human-readable reason for not-found', () => {
+    const reason = formatIssueMetadataFallbackReason(236, {
+      status: 'not-found',
+      message: 'Not found',
+      statusCode: 404,
+    });
+    expect(reason).toBe('Skipped Issue #236: issue not found (404)');
+  });
+
+  test('formats human-readable reason for unauthenticated', () => {
+    const reason = formatIssueMetadataFallbackReason(236, {
+      status: 'unauthenticated',
+      message: 'Bad token',
+      statusCode: 401,
+    });
+    expect(reason).toBe(
+      'Skipped Issue #236: GitHub authentication required or token invalid',
+    );
+  });
+
+  test('formats human-readable reason for rate-limited', () => {
+    const reason = formatIssueMetadataFallbackReason(236, {
+      status: 'rate-limited',
+      message: 'Rate limit exceeded',
+      statusCode: 429,
+    });
+    expect(reason).toBe('Skipped Issue #236: GitHub API rate limit reached');
+  });
+
+  test('formats human-readable reason for invalid-response', () => {
+    const reason = formatIssueMetadataFallbackReason(236, {
+      status: 'invalid-response',
+      message: 'Schema violation',
+    });
+    expect(reason).toBe(
+      'Skipped Issue #236: invalid issue metadata received from GitHub',
+    );
+  });
+
+  test('formats human-readable reason for network-error', () => {
+    const reason = formatIssueMetadataFallbackReason(236, {
+      status: 'network-error',
+      message: 'Connection failed',
+    });
+    expect(reason).toBe(
+      'Skipped Issue #236: network error fetching issue metadata',
+    );
+  });
+
+  test('throws error for unsupported failure status', () => {
+    expect(() =>
+      formatIssueMetadataFallbackReason(236, {
+        status: 'custom-status' as unknown as 'network-error',
+        message: 'Something unexpected happened',
+      }),
+    ).toThrow('Unsupported metadata lookup failure status: custom-status');
   });
 });
